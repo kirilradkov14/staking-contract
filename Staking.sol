@@ -30,7 +30,7 @@ contract Staking is Ownable {
     }
 
     modifier onlyStaker () {
-        require(stakerBalance[msg.sender] > 0, "Insufficient balance");
+        require(stakerBalance[msg.sender] > 0, "Insufficient staking balance");
         _;
     }
 
@@ -75,20 +75,17 @@ contract Staking is Ownable {
         uint256 balance = stakerBalance[msg.sender];
         uint256 rewards = claimableRewards[msg.sender];
 
-        // if not enough tokens in contract to distribute rewards, send the balance
+        // check if contract has enough tokens to distribute rewards
         uint256 contractBalance = token.balanceOf(address(this));
         if (contractBalance >= (totalValueLocked.add(claimableRewards[msg.sender]))){
-            token.transfer(recipent, balance.add(rewards));
-            totalValueLocked = totalValueLocked.sub(balance.add(rewards));
-
-            emit claimed(recipent, rewards);
-            emit unstaked(recipent, balance);
-        } else {
-            token.transfer(recipent, balance);
-            totalValueLocked = totalValueLocked.sub(balance);
-            
-            emit unstaked(recipent, balance);
+            token.transfer(recipent, rewards);
+            totalValueLocked = totalValueLocked.sub(rewards);
+            emit claimed(recipent, balance);
         }
+
+        token.transfer(recipent, balance);
+        totalValueLocked = totalValueLocked.sub(balance);
+        emit unstaked(recipent, balance);
 
         claimableRewards[msg.sender] = 0;
         stakerBalance[msg.sender] = 0;
@@ -107,7 +104,7 @@ contract Staking is Ownable {
         }
     }
 
-    function disableStaking (bool _isAvailable) private onlyOwner{
+    function changeAvailability (bool _isAvailable) private onlyOwner{
         isAvailable = _isAvailable;
     }
 
