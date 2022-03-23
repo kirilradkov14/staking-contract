@@ -1,136 +1,126 @@
 // SPDX-License-Identifier: Unlicensed
 pragma solidity > 0.4.0 < 0.9.0;
 
-import "./token.sol";
+import "./Token.sol";
 
 contract Staking is Ownable {
     using SafeMath for uint256;
 
     Token public token;
 
-    //defaults
-    uint256 public totalValueLocked = 0;
-    uint256 public rewardRate = 10; //percentage
-    uint256 public stakingPeriod = 90; //in days
+    //declare default values: isAvailable, apy, period, TVL
     bool public isAvailable = true;
+    uint256 public rewardRate = 10;
+    uint256 public stakingPeriod = 90;
+    uint256 public totalValueLocked = 0;
 
-    //mapping
-    mapping (address => uint256) public stakerBalance;
-    mapping(address => uint256) public timeLastStaked;
-    mapping(address => uint256) public claimableRewards;
+    //a struct to store stakedAmount, timeLastStaked, claimableRewards
+    struct Staker {
+        uint256 stakedAmount;
+        uint256 claimableRewards;
+        uint256 timeLastStaked;
+    }
+
+    //mapping address => struct
+    mapping (address => Staker) public stakers;
 
     //events
     event staked (address indexed staker, uint256 amount);
     event unstaked (address indexed staker, uint256 amount);
     event claimed(address indexed staker, uint256 amount);
-    event completedStaking(address indexed staker, bool  hasCompleted);
+    event completedStaking(address indexed staker, bool hasCompleted);
 
     constructor (Token _token) {
         token = _token;
     }
 
+    //modifiers
     modifier onlyStaker () {
-        require(stakerBalance[msg.sender] > 0, "Insufficient staking balance");
+        require(stakers[msg.sender].stakedAmount > 0, "Caller is not a staker.");
         _;
     }
-
     modifier onlyAvailable () {
-        require(isAvailable);
+        require(isAvailable, "Staking Program not currently available.");
+        _;
+    }
+    modifier onlyClaimable () {
+        require(block.timestamp > stakers[msg.sender].timeLastStaked.add(stakingPeriod.mul(1)), "Staking Period is not over yet.");
+        _;
+    }
+    modifier onlyEnoughBalance () {
+        require (token.balanceOf(address(this)) >= totalValueLocked.add(stakers[msg.sender].claimableRewards), "Not enough contract balance for rewards");
         _;
     }
 
-    function stake (uint256 _amount)  public onlyAvailable {
-        require (_amount > 0, "Invalid amount");
+    //stake function
+    function stake (uint256 _amount) public onlyAvailable onlyEnoughBalance {
+        require(_amount > 0, "Amount must exceed 0.");
 
+        //stake
         token.transferFrom(msg.sender, address(this), _amount);
-        totalValueLocked = totalValueLocked.add(_amount); //updates TVL
 
-        stakerBalance[msg.sender] = stakerBalance[msg.sender].add(_amount); //updates stakerBalance after staking
-        timeLastStaked[msg.sender] = block.timestamp; //updates the last time staked
+        // store the staked amount, calculate and store the rewards, get the time of staking
+        stakers[msg.sender].stakedAmount = stakers[msg.sender].stakedAmount.add(_amount);
+        stakers[msg.sender].claimableRewards = ((stakers[msg.sender].stakedAmount).mul(rewardRate)).div(100);
+        stakers[msg.sender].timeLastStaked = block.timestamp;
 
-        emit staked(msg.sender, stakerBalance[msg.sender]);
+        //update TVL
+        totalValueLocked = totalValueLocked.add(_amount);
 
-        claimableRewards[msg.sender] = (stakerBalance[msg.sender].mul(rewardRate)).div(100);
+        emit staked(msg.sender, _amount);
     }
 
-    function unstake () public onlyStaker {
-        require(!checkStakingCompleted(msg.sender), "Staking period completed, claim your rewards");
+    //unstake func
+    function unstake (uint256 _amount) public onlyStaker {
+        require(_amount > 0, "Amount must exceed 0.");
+
+        //unstake
+        token.transfer(msg.sender, _amount);
+
+        //update the staked amount, calculate and store the rewards
+        stakers[msg.sender].stakedAmount = stakers[msg.sender].stakedAmount.sub(_amount);
+        stakers[msg.sender].claimableRewards = ((stakers[msg.sender].stakedAmount).mul(rewardRate)).div(100);
+
+        //update TVL
+        totalValueLocked = totalValueLocked.sub(_amount);
+
+        emit unstaked(msg.sender, _amount);
+    }
+
+    //claim function
+    function claim () public onlyStaker onlyClaimable onlyEnoughBalance{
+        require(token.transfer(msg.sender, (stakers[msg.sender].stakedAmount).add(stakers[msg.sender].claimableRewards)), "Error");
         
-        uint256 balance = stakerBalance[msg.sender];
-        address recipent = payable (msg.sender);
+        //update TVL
+        totalValueLocked = totalValueLocked.sub((stakers[msg.sender].stakedAmount).add(stakers[msg.sender].claimableRewards));
 
-        token.transfer(recipent, balance);
-        totalValueLocked = totalValueLocked.sub(balance); //updates TVL
-
-        emit unstaked(recipent, balance);
-
-        claimableRewards[msg.sender] = 0;
-        stakerBalance[msg.sender] = 0;
+        emit claimed(msg.sender, stakers[msg.sender].claimableRewards);
+        emit unstaked(msg.sender, stakers[msg.sender].stakedAmount);
     }
 
-    function claim () public onlyStaker {
-        require(checkStakingCompleted(msg.sender), "No rewards to claim");
-
-        address recipent = payable (msg.sender);
-        uint256 balance = stakerBalance[msg.sender];
-        uint256 rewards = claimableRewards[msg.sender];
-
-        // check if contract has enough tokens to distribute rewards
-        uint256 contractBalance = token.balanceOf(address(this));
-        if (contractBalance >= (totalValueLocked.add(claimableRewards[msg.sender]))){
-            token.transfer(recipent, rewards);
-            totalValueLocked = totalValueLocked.sub(rewards);
-            emit claimed(recipent, balance);
-        }
-
-        token.transfer(recipent, balance);
-        totalValueLocked = totalValueLocked.sub(balance);
-        emit unstaked(recipent, balance);
-
-        claimableRewards[msg.sender] = 0;
-        stakerBalance[msg.sender] = 0;
-    }
-
-    //check if staker has completed the staking period
-    function checkStakingCompleted(address _staker) internal returns(bool){
-        address staker = _staker;
-        uint256 timeRequired = timeLastStaked[msg.sender].add(stakingPeriod.mul(1)); // 86400 for 1 day
-
-        if(block.timestamp > timeRequired){
-            emit completedStaking(staker, true);
-            return true;
+    //update status
+    function updateStatus() private onlyOwner {
+        if (isAvailable) {
+            isAvailable = false;
         } else {
-            return false;
+            isAvailable = true;
         }
     }
 
-    function changeAvailability (bool _isAvailable) private onlyOwner{
-        isAvailable = _isAvailable;
-    }
+    //update period
+    function udpatePeriod (uint256 _newPeriod) private onlyOwner {
+        require(_newPeriod != stakingPeriod && _newPeriod >= 0, "Invalid param.");
 
-// ! ======================= TESTING FUNCTIONS ==========================!
-    function changeAPY (uint256 _newValue) public onlyOwner{
-        require(_newValue >= 0 && _newValue <= 100, "The new APY must be between 0 and 100");
-        rewardRate = _newValue;
-    }
-
-    function changePeriod(uint256 _newPeriod) public onlyOwner{
-        require(_newPeriod > 0, "new period must be more than 0" );
         stakingPeriod = _newPeriod;
     }
 
-    function getContractBalance () public view returns (uint256){
-        uint256 contractBalance = token.balanceOf(address(this));
-        return contractBalance;
-    }
+    //update returns
+    function changeAPY (uint256 _newRate) private onlyOwner {
+        require(_newRate != rewardRate && _newRate >=0, "Invalid param.");
 
-    function getRewardBalance () public view returns (uint256){
-        uint256 rewardBalance = token.balanceOf(address(this)).sub(totalValueLocked);
-        return rewardBalance;
-    }
-
-    function getStakerRewards (uint256 _amount) public view returns (uint256){
-        uint256 stakerRewards = (_amount.mul(rewardRate)).div(100);
-        return stakerRewards;
+        rewardRate = _newRate;
     }
 }
+
+
+
