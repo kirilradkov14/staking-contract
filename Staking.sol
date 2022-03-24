@@ -9,10 +9,10 @@ contract Staking is Ownable {
     Token public token;
 
     //declare default values: isAvailable, apy, period, TVL
-    bool isAvailable = true;
-    uint256 rewardRate = 10;
-    uint256 stakingPeriod = 90;
-    uint256 totalValueLocked = 0;
+    bool public isAvailable = true;
+    uint256 public rewardRate = 10;
+    uint256 public stakingPeriod = 90;
+    uint256 public totalValueLocked = 0;
 
     //a struct to store stakedAmount, timeLastStaked, claimableRewards
     struct Staker {
@@ -51,7 +51,7 @@ contract Staking is Ownable {
         _;
     }
 
-    //stake func
+    //stake function
     function stake (uint256 _amount) external onlyAvailable onlyEnoughBalance {
         require(_amount > 0, "Amount must exceed 0.");
 
@@ -69,7 +69,7 @@ contract Staking is Ownable {
         emit staked(msg.sender, _amount);
     }
 
-    //unstake func
+    //unstake function
     function unstake (uint256 _amount) external onlyStaker {
         require(_amount > 0, "Amount must exceed 0.");
 
@@ -86,10 +86,16 @@ contract Staking is Ownable {
         emit unstaked(msg.sender, _amount);
     }
 
-    //claim func
+    //claim function
     function claim () external onlyStaker onlyClaimable onlyEnoughBalance{
+
+        //claim + unstake
         token.transfer(msg.sender, stakers[msg.sender].claimableRewards.add(stakers[msg.sender].stakedAmount));
-        
+
+        //update TVL
+        totalValueLocked = totalValueLocked.sub(stakers[msg.sender].stakedAmount);
+
+        //null balances
         stakers[msg.sender].stakedAmount = 0;
         stakers[msg.sender].claimableRewards = 0;
 
