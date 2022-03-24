@@ -9,10 +9,10 @@ contract Staking is Ownable {
     Token public token;
 
     //declare default values: isAvailable, apy, period, TVL
-    bool public isAvailable = true;
-    uint256 public rewardRate = 10;
-    uint256 public stakingPeriod = 90;
-    uint256 public totalValueLocked = 0;
+    bool isAvailable = true;
+    uint256 rewardRate = 10;
+    uint256 stakingPeriod = 90;
+    uint256 totalValueLocked = 0;
 
     //a struct to store stakedAmount, timeLastStaked, claimableRewards
     struct Staker {
@@ -28,7 +28,6 @@ contract Staking is Ownable {
     event staked (address indexed staker, uint256 amount);
     event unstaked (address indexed staker, uint256 amount);
     event claimed(address indexed staker, uint256 amount);
-    event completedStaking(address indexed staker, bool hasCompleted);
 
     constructor (Token _token) {
         token = _token;
@@ -52,8 +51,8 @@ contract Staking is Ownable {
         _;
     }
 
-    //stake function
-    function stake (uint256 _amount) public onlyAvailable onlyEnoughBalance {
+    //stake func
+    function stake (uint256 _amount) external onlyAvailable onlyEnoughBalance {
         require(_amount > 0, "Amount must exceed 0.");
 
         //stake
@@ -71,7 +70,7 @@ contract Staking is Ownable {
     }
 
     //unstake func
-    function unstake (uint256 _amount) public onlyStaker {
+    function unstake (uint256 _amount) external onlyStaker {
         require(_amount > 0, "Amount must exceed 0.");
 
         //unstake
@@ -87,19 +86,20 @@ contract Staking is Ownable {
         emit unstaked(msg.sender, _amount);
     }
 
-    //claim function
-    function claim () public onlyStaker onlyClaimable onlyEnoughBalance{
-        require(token.transfer(msg.sender, (stakers[msg.sender].stakedAmount).add(stakers[msg.sender].claimableRewards)), "Error");
+    //claim func
+    function claim () external onlyStaker onlyClaimable onlyEnoughBalance{
+        token.transfer(msg.sender, stakers[msg.sender].claimableRewards.add(stakers[msg.sender].stakedAmount));
         
-        //update TVL
-        totalValueLocked = totalValueLocked.sub((stakers[msg.sender].stakedAmount).add(stakers[msg.sender].claimableRewards));
+        stakers[msg.sender].stakedAmount = 0;
+        stakers[msg.sender].claimableRewards = 0;
 
         emit claimed(msg.sender, stakers[msg.sender].claimableRewards);
         emit unstaked(msg.sender, stakers[msg.sender].stakedAmount);
     }
 
+
     //update status
-    function updateStatus() private onlyOwner {
+    function updateStatus() external onlyOwner {
         if (isAvailable) {
             isAvailable = false;
         } else {
@@ -108,14 +108,14 @@ contract Staking is Ownable {
     }
 
     //update period
-    function udpatePeriod (uint256 _newPeriod) private onlyOwner {
+    function udpatePeriod (uint256 _newPeriod) external onlyOwner {
         require(_newPeriod != stakingPeriod && _newPeriod >= 0, "Invalid param.");
 
         stakingPeriod = _newPeriod;
     }
 
     //update returns
-    function changeAPY (uint256 _newRate) private onlyOwner {
+    function changeAPY (uint256 _newRate) external onlyOwner {
         require(_newRate != rewardRate && _newRate >=0, "Invalid param.");
 
         rewardRate = _newRate;
